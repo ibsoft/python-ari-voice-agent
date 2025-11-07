@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+from collections import OrderedDict
+import threading
 
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import ApiError, TransportError
@@ -58,6 +60,9 @@ class ElasticVectorRetriever:
         self.min_score = float(cfg.get("min_score", 0.0))
         self.default_embedding_model = cfg.get("embedding_model", "text-embedding-3-large")
         self.conversation_logging_enabled = bool(cfg.get("conversation_log_enabled"))
+        self.embedding_cache_size = int(cfg.get("embedding_cache_size", 32))
+        self._embedding_cache: "OrderedDict[str, List[float]]" = OrderedDict()
+        self._cache_lock = threading.Lock()
 
         self.index_configs = self._normalize_indexes(cfg)
         self.searchable_indexes = [info for info in self.index_configs if info["searchable"]]
@@ -76,8 +81,18 @@ class ElasticVectorRetriever:
         if not text.strip():
             return []
         model = model_override or self.default_embedding_model
+        key = f"{model}:{text.strip()}"
+        with self._cache_lock:
+            if key in self._embedding_cache:
+                self._embedding_cache.move_to_end(key)
+                return list(self._embedding_cache[key])
         resp = self.oa.embeddings.create(model=model, input=text)
-        return resp.data[0].embedding  # type: ignore[attr-defined]
+        embedding = resp.data[0].embedding  # type: ignore[attr-defined]
+        with self._cache_lock:
+            self._embedding_cache[key] = embedding
+            if len(self._embedding_cache) > self.embedding_cache_size:
+                self._embedding_cache.popitem(last=False)
+        return embedding
 
     def _normalize_indexes(self, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         normalized: List[Dict[str, Any]] = []

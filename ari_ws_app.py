@@ -454,6 +454,29 @@ def strip_citations(text: str) -> str:
     return cleaned
 
 
+def clamp_response_length(text: str, cfg: dict) -> str:
+    if not text:
+        return text
+    limit = int(cfg.get("agent", {}).get("max_response_chars", 650) or 0)
+    if limit <= 0 or len(text) <= limit:
+        return text
+    sentences = re.split(r"(?<=[.!;?])\s+", text)
+    out = []
+    total = 0
+    for sent in sentences:
+        clean = sent.strip()
+        if not clean:
+            continue
+        candidate_len = total + (1 if out else 0) + len(clean)
+        if candidate_len > limit:
+            break
+        out.append(clean)
+        total = candidate_len
+    if out:
+        return " ".join(out)
+    return text[:limit].rsplit(" ", 1)[0] if " " in text[:limit] else text[:limit]
+
+
 async def log_conversation_event(
     cfg: dict,
     speaker: str,
@@ -924,6 +947,7 @@ async def chat_with_model(
     """
     Returns: (response_text, should_end, tts_audio, did_transfer, offered_transfer_this_turn)
     """
+    global elastic_rag
     u = (user_text or "").strip()
     log.info("AGENT → user_text: %s", u)
     
@@ -1046,10 +1070,6 @@ async def chat_with_model(
         tts_audio = await tts_wav16k_cached(goodbye_text, cfg)
         return goodbye_text, True, tts_audio, False, False
 
-    # ── Start ACK immediately ──
-    await _play_ack_if_enabled()
-
-    global elastic_rag
     model = cfg["agent"].get("model", DEFAULTS["agent"]["model"])
     base_instructions = cfg["agent"].get("instructions", DEFAULTS["agent"]["instructions"])
     agent_id = cfg["agent"].get("agent_id")
@@ -1062,6 +1082,16 @@ async def chat_with_model(
     elastic_cfg = cfg.get("elasticsearch", {})
     elastic_enabled = bool(retrieval_mode == "elastic" and elastic_cfg.get("enabled") and elastic_rag)
     rag_active = file_search_enabled or elastic_enabled
+
+    # ── Pre-fetch Elastic context concurrently ──
+    elastic_results_task: Optional[asyncio.Task] = None
+    if elastic_enabled and elastic_rag:
+        async def _fetch_elastic_context():
+            return await asyncio.to_thread(elastic_rag.search, u)
+        elastic_results_task = asyncio.create_task(_fetch_elastic_context())
+
+    # ── Start ACK immediately ──
+    await _play_ack_if_enabled()
 
     retrieval_rules = retrieval_conf.get("instructions", DEFAULTS["retrieval"]["instructions"])
 
@@ -1140,9 +1170,16 @@ async def chat_with_model(
             base_input.append({"role": role, "content": content})
 
     elastic_hits_found = False
-    if elastic_enabled and elastic_rag:
-        elastic_results = elastic_rag.search(u)
-        elastic_hits_found = bool(elastic_results)
+    elastic_results: List[Dict[str, Any]] = []
+    if elastic_results_task:
+        try:
+            elastic_results = await elastic_results_task
+        except Exception as exc:
+            log.error("Elastic retrieval task failed: %s", exc)
+            elastic_results = []
+
+    if elastic_results:
+        elastic_hits_found = True
         if elastic_hits_found:
             context_payload = ElasticVectorRetriever.format_results(elastic_results)
             log.info("Elastic retrieval returned %d hits", len(elastic_results))
@@ -1150,27 +1187,33 @@ async def chat_with_model(
                 "role": "assistant",
                 "content": "[Βάση γνώσης]\n" + context_payload
             })
-        else:
-            log.info("Elastic retrieval returned no matches")
-            base_input.append({
-                "role": "system",
-                "content": (
-                    "Η αναζήτηση στην Elasticsearch βάση δεν επέστρεψε σχετικά στοιχεία. "
-                    "Ενημέρωσε τον χρήστη ότι δεν υπάρχουν διαθέσιμες πληροφορίες και πρότεινε μεταφορά σε τεχνικό όταν χρειάζεται."
-                )
-            })
+    elif elastic_enabled and elastic_rag:
+        log.info("Elastic retrieval returned no matches")
+        base_input.append({
+            "role": "system",
+            "content": (
+                "Η αναζήτηση στην Elasticsearch βάση δεν επέστρεψε σχετικά στοιχεία. "
+                "Ενημέρωσε τον χρήστη ότι δεν υπάρχουν διαθέσιμες πληροφορίες και πρότεινε μεταφορά σε τεχνικό όταν χρειάζεται."
+            )
+        })
 
     # track turn counter for dialog diagnostics
     dialog_state["turn_counter"] = dialog_state.get("turn_counter", 0) + 1
 
     base_input.append({"role": "user", "content": u or "Απάντησε σύντομα και καθαρά."})
 
+    agent_temp = float(cfg["agent"].get("temperature", 0.2))
+    agent_max_tokens = int(cfg["agent"].get("max_output_tokens", 0) or 0)
+
     kwargs = {
         "model": model,
         "input": base_input,
         "tools": tools,
-        "tool_choice": "auto"
+        "tool_choice": "auto",
+        "temperature": agent_temp
     }
+    if agent_max_tokens > 0:
+        kwargs["max_output_tokens"] = agent_max_tokens
 
     offered_transfer_this_turn = False
 
@@ -1271,6 +1314,7 @@ async def chat_with_model(
             }
 
         response_text = apply_salutation(response_text, caller_profile)
+        response_text = clamp_response_length(response_text, cfg)
 
         tts_audio = await tts_wav16k_cached(response_text, cfg)
         should_end = is_goodbye_message(response_text, cfg)

@@ -23,24 +23,26 @@ external_media:
   port_max: 40050
 
 # ───────────── Χαιρετισμός ─────────────
-greeting_text: "Γειά σας! Είμαι η Ίριδα, η τεχνικός υποστήριξης AI της UNIXFOR. Πώς μπορώ να σας βοηθήσω;"
+greeting_text: "Καλησπέρα! Είμαι ο Πέτρος, τεχνικός υποστήριξης AI της UNIXFOR. Πώς μπορώ να σας βοηθήσω;"
 
 # ───────────── Agent / Συνομιλία ─────────────
 agent:
-  agent_id: "iris"
+  agent_id: "petros"
   model: "gpt-4o-mini"
   rag_only: true
   non_rag_smalltalk_ok: true
   ack_enabled: false
+  temperature: 0.2
+  max_output_tokens: 380
   instructions: |
-    Είσαι η «Ίριδα», εξειδικευμένη τεχνικός υποστήριξης της UNIXFOR για συστήματα APS compact NL & APS Cashless TTW (Through the wall).
+    Είσαι ο «Πέτρος», εξειδικευμένος τεχνικός υποστήριξης της UNIXFOR για συστήματα APS compact NL & APS Cashless TTW (Through the wall).
     Μίλα αποκλειστικά Ελληνικά, με σύντομες και καθαρές παραγράφους, χωρίς bullets ή SSML.
     Για τεχνικές απαντήσεις χρησιμοποίησε ΑΠΟΚΛΕΙΣΤΙΚΑ το περιεχόμενο του file_search.
     Αν η απάντηση από το file_search πελιλαμβάνει βήματα, πχ. ( 1. 2. 3...) ανάφερε τα πιστά και μην παραλείψεις κανένα, ούτε να προσθέσεις άλλα φανταστικά.
     Αν δεν υπάρχει επαρκές υλικό, πες το ρητά, ζήτα διευκρίνιση ή πρότεινε μεταφορά σε τεχνικό.
     Μην αναφέρεις ονόματα αρχείων ή πηγές. Μην εφευρίσκεις πληροφορίες.
     Πριν προτείνεις μεταφορά σε τεχνικό, ρώτα αν θέλει μεταφορά.
-    Αν γνωρίζεις το επώνυμο του καλούντος, να τον/την προσφωνείς με πλήρη μορφή: "για άνδρα «Κύριε <Επώνυμο-στην-κλητική>», για γυναίκα «Κυρία <Επώνυμο>», αλλιώς «Κ. <Επώνυμο>»."
+    Αν γνωρίζεις το επώνυμο του καλούντος, να τον προσφωνείς ως «Κύριε <Επώνυμο-στην-κλητική>» ή «Κ. <Επώνυμο>».
     ΚΑΝΟΝΕΣ ΜΕΤΑΦΟΡΑΣ:
     - Μεταφορά όταν ο χρήστης τη ζητά ρητά ή όταν δεν υπάρχει διαθέσιμη λύση
     - Αν ο χρήστης απαντήσει καταφατικά σε «να σας συνδέσω;», προχώρα άμεσα.
@@ -51,9 +53,9 @@ agent:
     - Μπορώ να μιλήσω με άνθρωπο; → TRANSFER
     - Δεν μπορείτε να με βοηθήσετε → TRANSFER
     - Αυτό είναι πολύ περίπλοκο → TRANSFER
+    Κράτα τις απαντήσεις σε το πολύ τέσσερις σύντομες προτάσεις ή αριθμημένα βήματα και πες μόνο το απολύτως απαραίτητο.
 
-  wait_phrases:
-    - "Παρακαλώ περιμένετε, αναζητώ τις πληροφορίες."
+  wait_phrases: []
   wait_only_with_file_search: true
   waiter_trailing_ms: 500
   slow_tts_wait_ms: 700
@@ -62,10 +64,11 @@ agent:
   max_wait_messages: 2
   no_wait_smalltalk: true
   wait_every_turn: false
-  conversation_memory_size: 3
+  conversation_memory_size: 1
   user_data_file: "user_data.pkl"
   ack_exclamations:
     - "Μάλιστα."
+  max_response_chars: 480
 
 # ───────────── Retrieval / File Search ─────────────
 retrieval:
@@ -115,13 +118,13 @@ elasticsearch:
 # ───────────── TTS ─────────────
 tts:
   model: "gpt-4o-mini-tts"
-  voice: "alloy"
+  voice: "onyx"
   trailing_silence_ms: 280
   gain_db: 2.5
   timeout: 25.0
   max_text_length: 1200
   chunk_soft_limit: 260
-  speed: 1.0
+  speed: 1.25
   prosody_enhancement: true
 
 # ───────────── STT ─────────────
