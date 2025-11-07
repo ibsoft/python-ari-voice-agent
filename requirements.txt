@@ -1,0 +1,5 @@
+websocket-client==1.8.0
+requests==2.32.3
+PyYAML==6.0.2
+elasticsearch==8.15.1
+pypdf==4.3.1
